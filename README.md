@@ -1,31 +1,68 @@
 # SpiderWire
 
+[![PyPI](https://img.shields.io/pypi/v/spiderwire.svg)](https://pypi.org/project/spiderwire/)
+[![Python](https://img.shields.io/pypi/pyversions/spiderwire.svg)](https://pypi.org/project/spiderwire/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/1am/spiderwire/actions/workflows/ci.yml/badge.svg)](https://github.com/1am/spiderwire/actions/workflows/ci.yml)
+
 Open Modbus RTU library and `gss-ctrl` CLI for the **SpiderFarmer GSS**
 peripheral bus (inline fans, CO₂ sensor, sensor hub, light driver). The
 OEM GSS hub is a Modbus RTU master over a proprietary RJ12 wire layout;
-SpiderWire replaces that hub so you can drive the bus from any host —
+SpiderWire replaces that hub so you can drive the bus from any host -
 locally, no cloud account.
+
+> **Unofficial and experimental.** This is an independent project with no
+> affiliation, endorsement, or relationship with SpiderFarmer. It works
+> on my hardware, but the GSS ecosystem ships in many hardware and
+> firmware revisions - yours may behave differently or not work at all.
+> Expect rough edges and verify behavior on your own bus before relying
+> on it.
 
 Two surfaces, one library:
 
-| Surface | Role | What ships with it |
-|---|---|---|
-| `spiderwire` Python package | Transport, register map, tiered bus master | `bus.py`, `protocol.py`, `registers.py`, `transport.py` |
-| `gss-ctrl` CLI | Test / ops / manual control over USB-RS485 | `gss-ctrl scan / poll / read / write / fan / blower / light` |
+| Surface                     | Role                                       | What ships with it                                           |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| `spiderwire` Python package | Transport, register map, tiered bus master | `bus.py`, `protocol.py`, `registers.py`, `transport.py`      |
+| `gss-ctrl` CLI              | Test / ops / manual control over USB-RS485 | `gss-ctrl scan / poll / read / write / fan / blower / light` |
 
-Companion repo: **[`spiderfarmer-ha`](https://github.com/1am/spiderfarmer-ha)** — a
-Home Assistant integration that pulls SpiderWire in as a git submodule
-and exposes the bus as HA entities.
+A companion Home Assistant integration is under [spiderfarmer-ha](https://github.com/1am/spiderfarmer-ha).
 
-- [PCB preview](https://www.youtube.com/watch?v=0Yn37gflFO0)
+## Hardware
+
+See [./docs/hw-notes.md](./docs/hw-notes.md) for more details on how to connect to the bus.
+
+## Usage
+
+You can use it independently as a controller and a reader from the bus
+
+[![asciicast](https://asciinema.org/a/1030214.svg)](https://asciinema.org/a/1030214)
+
+It is also possible to just sniff the bus with GSS connected to see what is happening but as expecteed there will be quite a few CRC error with
+2 devices polling on the same bus.
+
+[![asciicast](https://asciinema.org/a/pjMOnAvHK90CbKit.svg)](https://asciinema.org/a/pjMOnAvHK90CbKit)
 
 ## Install
+
+From PyPI (recommended):
+
+```bash
+pip install spiderwire
+```
+
+From source (for development):
 
 ```bash
 git clone https://github.com/1am/spiderwire.git
 cd spiderwire
-make install                          # uv sync — Python 3.13 + pyserial
+uv sync                        # installs runtime + dev tools (pytest, ruff, build, twine)
+# or, with pip:
+pip install -e .
+pip install pytest ruff build twine
 ```
+
+Requires Python 3.10+ and a USB-RS485 adapter (`pyserial` is the only
+runtime dependency).
 
 ## CLI quickstart
 
@@ -49,28 +86,29 @@ Full CLI: `gss-ctrl --help`. Commands: `scan`, `poll`, `read`, `write`,
 ## Library use
 
 ```python
-from spiderwire.transport import RS485Transport
-from spiderwire.bus import BusMaster
+from spiderwire import BusMaster, RS485Transport
 
-with RS485Transport("/dev/ttyUSB0", baud=115200) as tx:
+with RS485Transport("/dev/ttyUSB0", baudrate=115200) as tx:
     bus = BusMaster(tx)
-    for snapshot in bus.tick_forever(interval=1.0, heartbeat=3.5):
-        print(snapshot)
+    bus.poll_loop(interval=1.0, callback=print)
 ```
 
-See `bus.py` for the tiered scheduler, `registers.py` for the per-device
-register map, and `transport.py` for the RS-485 framer.
+See `src/spiderwire/bus.py` for the tiered scheduler,
+`src/spiderwire/registers.py` for the per-device register map, and
+`src/spiderwire/transport.py` for the RS-485 framer.
 
 ## Layout
 
 ```
 spiderwire/
-├── spiderwire/                  Python package (lib)
-│   ├── bus.py                   tiered master + heartbeat scheduler
-│   ├── protocol.py              Modbus RTU framing + CRC
-│   ├── registers.py             per-device register map + decoders
-│   └── transport.py             RS-485 framer over pyserial
-├── gss_ctrl_pc/                 gss-ctrl CLI (stand-in for the OEM master)
+├── src/
+│   ├── spiderwire/              Python package (lib)
+│   │   ├── bus.py               tiered master + heartbeat scheduler
+│   │   ├── protocol.py          Modbus RTU framing + CRC
+│   │   ├── registers.py         per-device register map + decoders
+│   │   └── transport.py         RS-485 framer over pyserial
+│   └── gss_ctrl_pc/             gss-ctrl CLI (stand-in for the OEM master)
+├── tests/                       pytest suite (no hardware required)
 ├── docs/                        protocol + device map reference
 ├── pyproject.toml               builds the `spiderwire` wheel + `gss-ctrl` script
 └── Makefile                     dev shortcuts
@@ -78,29 +116,21 @@ spiderwire/
 
 ## Docs
 
-- [`docs/device-map.md`](docs/device-map.md) — per-device register map
+- [`docs/device-map.md`](docs/device-map.md) - per-device register map
   for every address observed on the bus.
-- [`docs/protocol-analysis.md`](docs/protocol-analysis.md) — protocol
+- [`docs/protocol-analysis.md`](docs/protocol-analysis.md) - protocol
   reference: physical layer, function codes, tiered polling, heartbeat.
-- [`docs/hw-notes.md`](docs/hw-notes.md) — OEM hub board notes and RJ12
+- [`docs/hw-notes.md`](docs/hw-notes.md) - OEM hub board notes and RJ12
   pinout.
 
 ## License
 
-Copyright (C) 2026 1AM
+Copyright (c) 2026 [1AM](https://1am.pl)
 
-[GNU General Public License v3.0 or later](LICENSE) — free for any
-use, including commercial, with one strong condition: any product or
-distribution that includes this code (modified or unmodified) must
-itself be released under GPLv3, with full source code available to its
-users.
-
-That means a vendor — including SpiderFarmer or any successor — cannot
-ship this code inside a closed-source product. They have two options:
-
-1. Open-source their integration / firmware under GPLv3, with
-   attribution preserved, **or**
-2. Obtain a separate commercial license from me.
+Released under the [MIT License](LICENSE) - free to use, modify, and
+distribute, including in commercial and closed-source products. The
+only requirement is that the copyright notice and license text are
+preserved in copies or substantial portions of the software.
 
 ## Disclaimer
 
@@ -116,8 +146,8 @@ verifying the correctness of your wiring, your device configuration, and
 the commands you send.
 
 In no event shall the author or contributors be liable for any direct,
-indirect, incidental, special, exemplary, or consequential damages —
+indirect, incidental, special, exemplary, or consequential damages -
 including but not limited to damage to equipment, crops, property, or
-persons — arising from the use of, or inability to use, this software.
+persons - arising from the use of, or inability to use, this software.
 
 Use at your own risk.
